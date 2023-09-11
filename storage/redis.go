@@ -62,30 +62,29 @@ type LuckCharts struct {
 }
 
 type SumRewardData struct {
-	Interval int64  `json:"inverval"`
-	Reward   int64  `json:"reward"`
-	Name     string `json:"name"`
-	Offset   int64  `json:"offset"`
-	Blocks   int64  `json:"blocks"`
-	Effort   float64 `json:"averageLuck"`
+	Interval int64   `json:"inverval"`
+	Reward   int64   `json:"reward"`
+	Name     string  `json:"name"`
+	Offset   int64   `json:"offset"`
+	Blocks   int64   `json:"blocks"`
+	Effort   float64 `json:"personalLuck"`
 	Count    float64 `json:"_"`
 	ESum     float64 `json:"_"`
 }
 
 type RewardData struct {
-	Height    int64   `json:"blockheight"`
-	Timestamp int64   `json:"timestamp"`
-	BlockHash string  `json:"blockhash"`
-	Reward    int64   `json:"reward"`
-	Percent   float64 `json:"percent"`
-	Immature  bool    `json:"immature"`
-	Difficulty int64  `json:"-"`
-	PersonalShares int64 `json:"-"`
+	Height         int64   `json:"blockheight"`
+	Timestamp      int64   `json:"timestamp"`
+	BlockHash      string  `json:"blockhash"`
+	Reward         int64   `json:"reward"`
+	Percent        float64 `json:"percent"`
+	Immature       bool    `json:"immature"`
+	Difficulty     int64   `json:"-"`
+	PersonalShares int64   `json:"-"`
 	PersonalEffort float64 `json:"personalLuck"`
 }
 
 type BlockData struct {
-	Login          string   `json:"login"`
 	Worker         string   `json:"worker"`
 	ShareDiffCalc  int64    `json:"shareDiff"`
 	Height         int64    `json:"height"`
@@ -97,6 +96,7 @@ type BlockData struct {
 	UncleHeight    int64    `json:"uncleHeight"`
 	Orphan         bool     `json:"orphan"`
 	Hash           string   `json:"hash"`
+	Finder         string   `json:"finder"`
 	Nonce          string   `json:"-"`
 	PowHash        string   `json:"-"`
 	MixDigest      string   `json:"-"`
@@ -141,7 +141,7 @@ func (b *BlockData) RoundKey() string {
 }
 
 func (b *BlockData) key() string {
-	return join(b.UncleHeight, b.Orphan, b.Nonce, b.serializeHash(), b.Timestamp, b.Difficulty, b.TotalShares, b.Reward, b.Login, b.ShareDiffCalc, b.Worker, b.PersonalShares)
+	return join(b.UncleHeight, b.Orphan, b.Nonce, b.serializeHash(), b.Timestamp, b.Difficulty, b.TotalShares, b.Reward, b.Finder, b.ShareDiffCalc, b.Worker, b.PersonalShares)
 }
 
 type Miner struct {
@@ -155,6 +155,8 @@ type Miner struct {
 type Worker struct {
 	Miner
 	TotalHR         int64   `json:"hr2"`
+	PortDiff        string  `json:"portDiff"`
+	WorkerHostname  string  `json:"hostname"`
 	ValidShares     int64   `json:"valid"`
 	StaleShares     int64   `json:"stale"`
 	InvalidShares   int64   `json:"invalid"`
@@ -350,55 +352,54 @@ func convertPoolChartsResults(raw *redis.ZSliceCmd) []*PoolCharts {
 	return reverse
 }
 
-
 func (r *RedisClient) GetNetCharts(netHashLen int64) (stats []*NetCharts, err error) {
-    tx := r.client.Multi()
-    defer tx.Close()
+	tx := r.client.Multi()
+	defer tx.Close()
 
-    now := util.MakeTimestamp() / 1000
+	now := util.MakeTimestamp() / 1000
 
-    cmds, err := tx.Exec(func() error {
-        if err := tx.ZRemRangeByScore(r.formatKey("charts", "difficulty"), "-inf", fmt.Sprint("(", now-172800)).Err(); err != nil {
-            return err
-        }
-        zRangeCmd := tx.ZRevRangeWithScores(r.formatKey("charts", "difficulty"), 0, netHashLen)
-        if zRangeCmd.Err() != nil {
-            return zRangeCmd.Err()
-        }
-        return nil
-    })
-    if err != nil {
-        return nil, err
-    }
+	cmds, err := tx.Exec(func() error {
+		if err := tx.ZRemRangeByScore(r.formatKey("charts", "difficulty"), "-inf", fmt.Sprint("(", now-172800)).Err(); err != nil {
+			return err
+		}
+		zRangeCmd := tx.ZRevRangeWithScores(r.formatKey("charts", "difficulty"), 0, netHashLen)
+		if zRangeCmd.Err() != nil {
+			return zRangeCmd.Err()
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
-    zSliceCmd, ok := cmds[1].(*redis.ZSliceCmd)
-    if !ok {
-        return nil, fmt.Errorf("invalid command result type: %T", cmds[1])
-    }
-    stats, err = convertNetChartsResults(zSliceCmd)
-    if err != nil {
-        return nil, err
-    }
-    return stats, nil
+	zSliceCmd, ok := cmds[1].(*redis.ZSliceCmd)
+	if !ok {
+		return nil, fmt.Errorf("invalid command result type: %T", cmds[1])
+	}
+	stats, err = convertNetChartsResults(zSliceCmd)
+	if err != nil {
+		return nil, err
+	}
+	return stats, nil
 }
 
 func convertNetChartsResults(raw *redis.ZSliceCmd) ([]*NetCharts, error) {
-    var result []*NetCharts
-    for _, v := range raw.Val() {
-        // "Timestamp:TimeFormat:Hash"
-        pc := NetCharts{}
-        pc.Timestamp = int64(v.Score)
-        str := v.Member.(string)
-        pc.TimeFormat = str[strings.Index(str, ":")+1 : strings.LastIndex(str, ":")]
-        pc.NetHash, _ = strconv.ParseInt(str[strings.LastIndex(str, ":")+1:], 10, 64)
-        result = append(result, &pc)
-    }
+	var result []*NetCharts
+	for _, v := range raw.Val() {
+		// "Timestamp:TimeFormat:Hash"
+		pc := NetCharts{}
+		pc.Timestamp = int64(v.Score)
+		str := v.Member.(string)
+		pc.TimeFormat = str[strings.Index(str, ":")+1 : strings.LastIndex(str, ":")]
+		pc.NetHash, _ = strconv.ParseInt(str[strings.LastIndex(str, ":")+1:], 10, 64)
+		result = append(result, &pc)
+	}
 
-    var reverse []*NetCharts
-    for i := len(result) - 1; i >= 0; i-- {
-        reverse = append(reverse, result[i])
-    }
-    return reverse, nil
+	var reverse []*NetCharts
+	for i := len(result) - 1; i >= 0; i-- {
+		reverse = append(reverse, result[i])
+	}
+	return reverse, nil
 }
 
 func convertMinerChartsResults(raw *redis.ZSliceCmd) []*MinerCharts {
@@ -459,6 +460,52 @@ func (r *RedisClient) GetMinerCharts(hashNum int64, login string) (stats []*Mine
 	}
 	stats = convertMinerChartsResults(cmds[1].(*redis.ZSliceCmd))
 	return stats, nil
+}
+
+// DeleteOldMinerData deletes old miner data from the "miner" ZSets.
+// All entries that are older than 24 hours are removed.
+func (r *RedisClient) DeleteOldMinerData() error {
+	now := time.Now()
+	pastTime := now.Add(-24 * time.Hour)
+
+	// Retrieve all keys matching the pattern "charts:miner:*"
+	loginKeys, err := r.client.Keys(r.formatKey("charts", "miner", "*")).Result()
+	if err != nil {
+		return err
+	}
+
+	// Iterate through all found keys and remove the old entries
+	for _, loginKey := range loginKeys {
+		_, err := r.client.ZRemRangeByScore(loginKey, "-inf", fmt.Sprintf("(%d", pastTime.Unix())).Result()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeleteOldShareData deletes old share data from the "share" ZSets.
+// All entries that are older than 24 hours are removed.
+func (r *RedisClient) DeleteOldShareData() error {
+	now := time.Now()
+	pastTime := now.Add(-24 * time.Hour)
+
+	// Retrieve all keys matching the pattern "charts:share:*"
+	shareKeys, err := r.client.Keys(r.formatKey("charts", "share", "*")).Result()
+	if err != nil {
+		return err
+	}
+
+	// Iterate through all found keys and remove the old entries
+	for _, shareKey := range shareKeys {
+		_, err := r.client.ZRemRangeByScore(shareKey, "-inf", fmt.Sprintf("(%d", pastTime.Unix())).Result()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *RedisClient) GetShareCharts(shareNum int64, login string) (stats []*ShareCharts, err error) {
@@ -563,7 +610,7 @@ func (r *RedisClient) checkPoWExist(height uint64, params []string) (bool, error
 	return val == 0, err
 }
 
-func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, shareDiffCalc int64, height uint64, window time.Duration) (bool, error) {
+func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, shareDiffCalc int64, height uint64, window time.Duration, hostname string) (bool, error) {
 	exist, err := r.checkPoWExist(height, params)
 	if err != nil {
 		return false, err
@@ -579,14 +626,14 @@ func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, 
 	ts := ms / 1000
 
 	_, err = tx.Exec(func() error {
-		r.writeShare(tx, ms, ts, login, id, diff, shareDiffCalc, window)
+		r.writeShare(tx, ms, ts, login, id, diff, shareDiffCalc, window, hostname)
 		tx.HIncrBy(r.formatKey("stats"), "roundShares", diff)
 		return nil
 	})
 	return false, err
 }
 
-func (r *RedisClient) WriteBlock(login, id string, params []string, diff, shareDiffCalc int64, roundDiff int64, height uint64, window time.Duration) (bool, error) {
+func (r *RedisClient) WriteBlock(login, id string, params []string, diff, shareDiffCalc int64, roundDiff int64, height uint64, window time.Duration, hostname string) (bool, error) {
 	exist, err := r.checkPoWExist(height, params)
 	if err != nil {
 		return false, err
@@ -602,7 +649,7 @@ func (r *RedisClient) WriteBlock(login, id string, params []string, diff, shareD
 	ts := ms / 1000
 
 	cmds, err := tx.Exec(func() error {
-		r.writeShare(tx, ms, ts, login, id, diff, shareDiffCalc, window)
+		r.writeShare(tx, ms, ts, login, id, diff, shareDiffCalc, window, hostname)
 		tx.HSet(r.formatKey("stats"), "lastBlockFound", strconv.FormatInt(ts, 10))
 		tx.HDel(r.formatKey("stats"), "roundShares")
 		tx.HSet(r.formatKey("miners", login), "roundShares", strconv.FormatInt(0, 10))
@@ -655,7 +702,7 @@ func (r *RedisClient) WriteBlock(login, id string, params []string, diff, shareD
 	}
 }
 
-func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string, diff int64, shareDiffCalc int64, expire time.Duration) {
+func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string, diff int64, shareDiffCalc int64, expire time.Duration, hostname string) {
 	times := int(diff / 1000000000)
 	for i := 0; i < times; i++ {
 		tx.LPush(r.formatKey("lastshares"), login)
@@ -663,8 +710,8 @@ func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string
 	tx.LTrim(r.formatKey("lastshares"), 0, r.pplns)
 	tx.HIncrBy(r.formatKey("miners", login), "roundShares", diff)
 	tx.HIncrBy(r.formatKey("shares", "roundCurrent"), login, diff)
-	tx.ZAdd(r.formatKey("hashrate"), redis.Z{Score: float64(ts), Member: join(diff, login, id, ms)})
-	tx.ZAdd(r.formatKey("hashrate", login), redis.Z{Score: float64(ts), Member: join(diff, id, ms)})
+	tx.ZAdd(r.formatKey("hashrate"), redis.Z{Score: float64(ts), Member: join(diff, login, id, ms, hostname)})
+	tx.ZAdd(r.formatKey("hashrate", login), redis.Z{Score: float64(ts), Member: join(diff, id, ms, hostname)})
 	tx.Expire(r.formatKey("hashrate", login), expire) // Will delete hashrates for miners that gone
 	tx.HSet(r.formatKey("miners", login), "lastShare", strconv.FormatInt(ts, 10))
 	tx.HSet(r.formatKey("miners", login), "lastShareDiff", strconv.FormatInt(shareDiffCalc, 10))
@@ -1116,30 +1163,41 @@ func convertStringMap(m map[string]string) map[string]interface{} {
 	return result
 }
 
-// WARNING: Must run it periodically to flush out of window hashrate entries
-func (r *RedisClient) FlushStaleStats(window, largeWindow time.Duration) (int64, error) {
+// FlushStaleStats deletes all stale statistics in Redis.
+// window defines the duration after which the statistics become stale.
+// largeWindow defines the duration after which the statistics are permanently deleted.
+func (r *RedisClient) FlushStaleStats(staleDuration, largeWindow time.Duration) (int64, error) {
+	// Convert the current timestamp to seconds
 	now := util.MakeTimestamp() / 1000
-	max := fmt.Sprint("(", now-int64(window/time.Second))
-	total, err := r.client.ZRemRangeByScore(r.formatKey("hashrate"), "-inf", max).Result()
+	// Define the maximum expiry date for stale statistics
+	maxStale := fmt.Sprint("(", now-int64(staleDuration/time.Second))
+
+	// Delete all stale statistics from the "hashrate" hash
+	total, err := r.client.ZRemRangeByScore(r.formatKey("hashrate"), "-inf", maxStale).Result()
 	if err != nil {
 		return total, err
 	}
 
-	var c int64
+	var cursor int64
+	// Use a map to ensure that each miner is only processed once
 	miners := make(map[string]struct{})
-	max = fmt.Sprint("(", now-int64(largeWindow/time.Second))
+	// Define the maximum expiry date for the statistics to be deleted permanently
+	maxFinal := fmt.Sprint("(", now-int64(largeWindow/time.Second))
 
+	// Iterate over all hash keys starting with "hashrate", and delete all stale statistics for each miner
 	for {
 		var keys []string
 		var err error
-		c, keys, err = r.client.Scan(c, r.formatKey("hashrate", "*"), 100).Result()
+		cursor, keys, err = r.client.Scan(cursor, r.formatKey("hashrate", "*"), 100).Result()
 		if err != nil {
 			return total, err
 		}
-		for _, row := range keys {
-			login := strings.Split(row, ":")[2]
+		for _, key := range keys {
+			// Extract the miner name from the key
+			login := strings.Split(key, ":")[2]
 			if _, ok := miners[login]; !ok {
-				n, err := r.client.ZRemRangeByScore(r.formatKey("hashrate", login), "-inf", max).Result()
+				// Delete all stale statistics for this miner
+				n, err := r.client.ZRemRangeByScore(r.formatKey("hashrate", login), "-inf", maxFinal).Result()
 				if err != nil {
 					return total, err
 				}
@@ -1147,7 +1205,8 @@ func (r *RedisClient) FlushStaleStats(window, largeWindow time.Duration) (int64,
 				total += n
 			}
 		}
-		if c == 0 {
+		// If we've processed all keys, exit the loop
+		if cursor == 0 {
 			break
 		}
 	}
@@ -1361,9 +1420,13 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 
 	var dorew []*SumRewardData
 	dorew = append(dorew, &SumRewardData{Name: "Last 60 minutes", Interval: 3600, Offset: 0})
+	dorew = append(dorew, &SumRewardData{Name: "Last 3 hours", Interval: 3600 * 3, Offset: 0})
+	dorew = append(dorew, &SumRewardData{Name: "Last 6 hours", Interval: 3600 * 6, Offset: 0})
 	dorew = append(dorew, &SumRewardData{Name: "Last 12 hours", Interval: 3600 * 12, Offset: 0})
 	dorew = append(dorew, &SumRewardData{Name: "Last 24 hours", Interval: 3600 * 24, Offset: 0})
+	dorew = append(dorew, &SumRewardData{Name: "Last 2 days", Interval: 3600 * 24 * 2, Offset: 0})
 	dorew = append(dorew, &SumRewardData{Name: "Last 7 days", Interval: 3600 * 24 * 7, Offset: 0})
+	dorew = append(dorew, &SumRewardData{Name: "Last 14 days", Interval: 3600 * 24 * 14, Offset: 0})
 	dorew = append(dorew, &SumRewardData{Name: "Last 30 days", Interval: 3600 * 24 * 30, Offset: 0})
 
 	for _, reward := range rewards {
@@ -1384,7 +1447,15 @@ func (r *RedisClient) CollectWorkersStats(sWindow, lWindow time.Duration, login 
 		}
 	}
 	stats["sumrewards"] = dorew
-	stats["24hreward"] = dorew[2].Reward
+	stats["1hreward"] = dorew[0].Reward
+	stats["3hreward"] = dorew[1].Reward
+	stats["6hreward"] = dorew[2].Reward
+	stats["12hreward"] = dorew[3].Reward
+	stats["24hreward"] = dorew[4].Reward
+	stats["2dreward"] = dorew[5].Reward
+	stats["7dreward"] = dorew[6].Reward
+	stats["14dreward"] = dorew[7].Reward
+	stats["30dreward"] = dorew[8].Reward
 	return stats, nil
 }
 
@@ -1503,7 +1574,7 @@ func convertCandidateResults(raw *redis.ZSliceCmd) []*BlockData {
 		block.Timestamp, _ = strconv.ParseInt(fields[3], 10, 64)
 		block.Difficulty, _ = strconv.ParseInt(fields[4], 10, 64)
 		block.TotalShares, _ = strconv.ParseInt(fields[5], 10, 64)
-		block.Login = fields[6]
+		block.Finder = fields[6]
 		block.ShareDiffCalc, _ = strconv.ParseInt(fields[7], 10, 64)
 		block.PersonalShares, _ = strconv.ParseInt(fields[9], 10, 64)
 		block.Worker = fields[8]
@@ -1557,7 +1628,7 @@ func convertBlockResults(rows ...*redis.ZSliceCmd) []*BlockData {
 			block.TotalShares, _ = strconv.ParseInt(fields[6], 10, 64)
 			block.RewardString = fields[7]
 			block.ImmatureReward = fields[7]
-			block.Login = fields[8]
+			block.Finder = fields[8]
 			block.ShareDiffCalc, _ = strconv.ParseInt(fields[9], 10, 64)
 			block.PersonalShares, _ = strconv.ParseInt(fields[11], 10, 64)
 			block.Worker = fields[10]
@@ -1585,6 +1656,12 @@ func convertWorkersStats(window int64, raw *redis.ZSliceCmd, blocks *redis.ZSlic
 	for _, v := range raw.Val() {
 		parts := strings.Split(v.Member.(string), ":")
 		share, _ := strconv.ParseInt(parts[0], 10, 64)
+		var hostname string
+		if len(parts) > 3 {
+			hostname = parts[3]
+		} else {
+			hostname = "unknown"
+		}
 		id := parts[1]
 		score := int64(v.Score)
 		worker := workers[id]
@@ -1604,6 +1681,9 @@ func convertWorkersStats(window int64, raw *redis.ZSliceCmd, blocks *redis.ZSlic
 		if score >= now-window {
 			worker.HR += share
 		}
+
+		worker.PortDiff = parts[0]
+		worker.WorkerHostname = hostname
 
 		if worker.LastBeat < score {
 			worker.LastBeat = score
